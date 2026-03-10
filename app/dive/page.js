@@ -2,8 +2,12 @@
  * app/dive/page.js
  * DIVE DEEPER PAGE — Follow-up Q&A powered by AddSearch AI.
  *
- * Displays the initial AI answer and follow-up responses with full
- * Markdown rendering (headings, bold, code blocks, lists, links).
+ * Features:
+ *   - "Dive Deeper" / "Search" toggle at the top
+ *   - Initial AI answer with Markdown rendering
+ *   - Related Search Results below each AI answer (clickable pills)
+ *   - Clicking a related result or "Search" runs keyword search on home page
+ *   - Clicking magnifying glass icon runs that query as keyword search
  *
  * Docs:
  *   https://www.addsearch.com/docs/installing-ai-conversations/
@@ -13,6 +17,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import MarkdownRenderer from '../components/MarkdownRenderer';
 
 const siteKey =
@@ -23,12 +28,16 @@ const TIMEOUT_MS = 15000;
 const RATE_LIMIT_MS = 2000;
 
 export default function DivePage() {
+  const router = useRouter();
   const [context, setContext] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [clientReady, setClientReady] = useState(false);
+  // Related search results for the latest AI answer
+  const [relatedResults, setRelatedResults] = useState([]);
+  const [latestQuery, setLatestQuery] = useState('');
   const lastRequestRef = useRef(0);
   const clientRef = useRef(null);
   const threadEndRef = useRef(null);
@@ -36,7 +45,15 @@ export default function DivePage() {
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem('diveContext');
-      if (raw) setContext(JSON.parse(raw));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setContext(parsed);
+        setLatestQuery(parsed.query || '');
+        // Fetch related results for the initial query
+        if (parsed.query) {
+          fetchRelatedResults(parsed.query);
+        }
+      }
     } catch { /* */ }
   }, []);
 
@@ -71,6 +88,45 @@ export default function DivePage() {
     }
   }, []);
 
+  /* ── Fetch related keyword results for a query ───── */
+  function fetchRelatedResults(query) {
+    if (!query) return;
+
+    // Wait for client
+    function doFetch() {
+      const client = clientRef.current;
+      if (!client) {
+        setTimeout(doFetch, 300);
+        return;
+      }
+      try {
+        client.search(query, (response) => {
+          if (response && response.hits && response.hits.length > 0) {
+            const related = response.hits.slice(0, 4).map((hit) => ({
+              title: hit.title || 'Untitled',
+              url: hit.url || '',
+            }));
+            setRelatedResults(related);
+          } else {
+            setRelatedResults([]);
+          }
+        });
+      } catch {
+        setRelatedResults([]);
+      }
+    }
+    doFetch();
+  }
+
+  /* ── Navigate to home page with a search query ───── */
+  function goToSearch(query) {
+    try {
+      sessionStorage.setItem('pendingSearch', query || latestQuery);
+    } catch { /* */ }
+    router.push('/');
+  }
+
+  /* ── Handle follow-up ───────────────────────────── */
   const handleFollowUp = useCallback(
     (e) => {
       e.preventDefault();
@@ -99,6 +155,8 @@ export default function DivePage() {
       setMessages((prev) => [...prev, { role: 'user', text: trimmed }]);
       setInput('');
       setIsLoading(true);
+      setRelatedResults([]);
+      setLatestQuery(trimmed);
 
       const timeout = setTimeout(() => {
         setIsLoading(false);
@@ -122,6 +180,8 @@ export default function DivePage() {
               ...prev,
               { role: 'assistant', text: response.answer, sources },
             ]);
+            // Fetch related keyword results for this follow-up
+            fetchRelatedResults(trimmed);
           } else {
             setMessages((prev) => [
               ...prev,
@@ -142,14 +202,53 @@ export default function DivePage() {
     [input]
   );
 
+  /* ── Count total keyword results for display ─────── */
+  const [totalResults, setTotalResults] = useState(0);
+  useEffect(() => {
+    if (!latestQuery || !clientRef.current) return;
+    try {
+      clientRef.current.search(latestQuery, (response) => {
+        if (response && typeof response.total_hits === 'number') {
+          setTotalResults(response.total_hits);
+        }
+      });
+    } catch { /* */ }
+  }, [latestQuery, clientReady]);
+
   return (
     <main>
       <div className="page-wrapper">
-        <div className="dive-header">
-          <Link href="/" className="back-link">← Back to Search</Link>
-        </div>
+        {/* ── Mode Toggle (Dive Deeper / Search) ──── */}
+        <div className="mode-toggle-bar">
+          <div className="mode-toggle">
+            <button className="mode-toggle-btn mode-toggle-active">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              Dive Deeper
+            </button>
+            <button
+              className="mode-toggle-btn"
+              onClick={() => goToSearch(latestQuery)}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              Search
+            </button>
+          </div>
 
-        <h1 className="dive-page-title">Dive Deeper</h1>
+          {/* Top-right controls */}
+          <div className="mode-toggle-actions">
+            <Link href="/" className="mode-action-btn" title="Back to home">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </Link>
+          </div>
+        </div>
 
         {/* ── Initial AI Answer ─────────────────────── */}
         {context?.answer && (
@@ -160,7 +259,6 @@ export default function DivePage() {
                 Query: <strong>{context.query}</strong>
               </p>
             )}
-            {/* Render the answer as formatted Markdown */}
             <MarkdownRenderer content={context.answer} />
             {context.sources && context.sources.length > 0 && (
               <div style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px solid rgba(226,66,42,0.15)' }}>
@@ -196,7 +294,6 @@ export default function DivePage() {
               }
             >
               {msg.role === 'assistant' ? (
-                /* Render assistant responses as formatted Markdown */
                 <MarkdownRenderer content={msg.text} />
               ) : (
                 <p>{msg.text}</p>
@@ -224,6 +321,42 @@ export default function DivePage() {
 
           <div ref={threadEndRef} />
         </div>
+
+        {/* ── Related Search Results ───────────────── */}
+        {relatedResults.length > 0 && !isLoading && (
+          <div className="related-results-section">
+            <p className="related-results-label">Related Search Results</p>
+            <div className="related-results-pills">
+              {relatedResults.map((r, i) => (
+                <button
+                  key={i}
+                  className="related-result-pill"
+                  onClick={() => goToSearch(r.title)}
+                  title={r.title}
+                >
+                  {r.title}
+                </button>
+              ))}
+              {/* Magnifying glass pill — go to full keyword results */}
+              <button
+                className="related-result-pill related-result-search-pill"
+                onClick={() => goToSearch(latestQuery)}
+                title={`Search all results for "${latestQuery}"`}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                {totalResults > 0 && (
+                  <span>+{totalResults}</span>
+                )}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: '2px' }}>
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── Follow-up Input ──────────────────────── */}
         <form className="dive-input-wrapper" onSubmit={handleFollowUp}>
