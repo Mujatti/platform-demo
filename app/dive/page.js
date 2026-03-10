@@ -167,7 +167,16 @@ export default function DivePage() {
       }, TIMEOUT_MS);
 
       try {
-        client.aiAnswers(trimmed, (response) => {
+        // Prepend the original search topic as a short context hint
+        // so the AI knows what "it" or "this" refers to.
+        // e.g. "custom fields" + "how can I implement it?"
+        //    → "custom fields: how can I implement it?"
+        const topic = context?.query || '';
+        const contextualQuery = topic
+          ? `${topic}: ${trimmed}`
+          : trimmed;
+
+        client.aiAnswers(contextualQuery, (response) => {
           clearTimeout(timeout);
           setIsLoading(false);
 
@@ -181,7 +190,7 @@ export default function DivePage() {
               { role: 'assistant', text: response.answer, sources },
             ]);
             // Fetch related keyword results for this follow-up
-            fetchRelatedResults(trimmed);
+            fetchRelatedResults(contextualQuery);
           } else {
             setMessages((prev) => [
               ...prev,
