@@ -1,6 +1,18 @@
 /**
  * app/page.js
  * HOME PAGE — Search + AI Answers + Keyword Results
+ *
+ * Uses AddSearch Search UI Library with hasAiAnswers: true.
+ * A MutationObserver watches the AI Answers container to detect when
+ * an answer has actually rendered, then shows the "Dive Deeper" button.
+ *
+ * We also hook into the client with a parallel aiAnswers() call to
+ * capture the raw structured response (answer text + sources) cleanly,
+ * so the /dive page receives well-formatted data.
+ *
+ * Docs:
+ *   https://www.addsearch.com/docs/implementing-ai-answers/
+ *   https://www.addsearch.com/docs/ai-answers-to-results-page/
  */
 'use client';
 
@@ -69,11 +81,13 @@ export default function HomePage() {
         searchui.start();
         uiRef.current = searchui;
 
-        var aiContainer = document.getElementById('addsearch-ai-answers');
+        // Watch for AI answer content appearing
+        const aiContainer = document.getElementById('addsearch-ai-answers');
         if (aiContainer) {
-          var observer = new MutationObserver(function () {
-            var isVisible = aiContainer.style.display !== 'none';
-            var hasContent = aiContainer.innerText.trim().length > 30;
+          const observer = new MutationObserver(() => {
+            // Only show Dive Deeper if AI container is visible and has content
+            const isVisible = aiContainer.style.display !== 'none';
+            const hasContent = aiContainer.innerText.trim().length > 30;
             setShowDiveDeeper(isVisible && hasContent);
           });
           observer.observe(aiContainer, {
@@ -83,72 +97,86 @@ export default function HomePage() {
           });
         }
 
-        var searchFieldEl = document.getElementById('addsearch-searchfield');
+        // Listen for search submissions to fire parallel capture
+        // Also re-show AI answers container in case it was hidden by keywordOnly mode
+        const searchFieldEl = document.getElementById('addsearch-searchfield');
         if (searchFieldEl) {
           function onManualSearch() {
-            var aiC = document.getElementById('addsearch-ai-answers');
+            // Re-show AI answers for manual searches
+            const aiC = document.getElementById('addsearch-ai-answers');
             if (aiC) aiC.style.display = '';
             setTimeout(grabQueryAndFetch, 100);
           }
           searchFieldEl.addEventListener('submit', onManualSearch, true);
-          searchFieldEl.addEventListener('keydown', function (e) {
+          searchFieldEl.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') onManualSearch();
           }, true);
-          searchFieldEl.addEventListener('click', function (e) {
+          searchFieldEl.addEventListener('click', (e) => {
             if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
               onManualSearch();
             }
           }, true);
         }
 
+        // Check for pending search from /dive page navigation
         try {
-          var pending = sessionStorage.getItem('pendingSearch');
-          var pendingMode = sessionStorage.getItem('pendingSearchMode');
+          const pending = sessionStorage.getItem('pendingSearch');
+          const pendingMode = sessionStorage.getItem('pendingSearchMode');
           if (pending) {
             sessionStorage.removeItem('pendingSearch');
             sessionStorage.removeItem('pendingSearchMode');
 
-            var isKeywordOnly = pendingMode === 'keywordOnly';
+            const isKeywordOnly = pendingMode === 'keywordOnly';
 
-            setTimeout(function () {
-              var inp = document.querySelector(
+            setTimeout(() => {
+              const inp = document.querySelector(
                 '#addsearch-searchfield input[type="text"], #addsearch-searchfield input[type="search"], #addsearch-searchfield input'
               );
               if (!inp) return;
 
-              var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+              // Fill the search field
+              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
                 window.HTMLInputElement.prototype, 'value'
               ).set;
               nativeInputValueSetter.call(inp, pending);
               inp.dispatchEvent(new Event('input', { bubbles: true }));
 
               if (isKeywordOnly) {
-                var aiContainer2 = document.getElementById('addsearch-ai-answers');
-                if (aiContainer2) aiContainer2.style.display = 'none';
+                // KEYWORD ONLY mode: hide AI answers, run search directly
+                // Hide the AI answers container so it doesn't show stale/new answers
+                const aiContainer = document.getElementById('addsearch-ai-answers');
+                if (aiContainer) aiContainer.style.display = 'none';
+                // Also hide our Dive Deeper button
                 setShowDiveDeeper(false);
 
-                setTimeout(function () {
-                  var btn = document.querySelector('#addsearch-searchfield button');
+                // Use the client directly for keyword-only search
+                setTimeout(() => {
+                  // Trigger the AddSearch UI search (which populates results)
+                  const btn = document.querySelector('#addsearch-searchfield button');
                   if (btn) btn.click();
-                  setTimeout(function () {
-                    var aiC = document.getElementById('addsearch-ai-answers');
+
+                  // After the search triggers, re-hide AI answers
+                  // (the SearchUI might show it again)
+                  setTimeout(() => {
+                    const aiC = document.getElementById('addsearch-ai-answers');
                     if (aiC) aiC.style.display = 'none';
                     setShowDiveDeeper(false);
                   }, 500);
-                  setTimeout(function () {
-                    var aiC = document.getElementById('addsearch-ai-answers');
+                  setTimeout(() => {
+                    const aiC = document.getElementById('addsearch-ai-answers');
                     if (aiC) aiC.style.display = 'none';
                     setShowDiveDeeper(false);
                   }, 1500);
-                  setTimeout(function () {
-                    var aiC = document.getElementById('addsearch-ai-answers');
+                  setTimeout(() => {
+                    const aiC = document.getElementById('addsearch-ai-answers');
                     if (aiC) aiC.style.display = 'none';
                     setShowDiveDeeper(false);
                   }, 3000);
                 }, 100);
               } else {
-                setTimeout(function () {
-                  var btn = document.querySelector('#addsearch-searchfield button');
+                // Normal mode: trigger full search with AI answers
+                setTimeout(() => {
+                  const btn = document.querySelector('#addsearch-searchfield button');
                   if (btn) btn.click();
                   capturedQueryRef.current = pending;
                   grabQueryAndFetch();
@@ -156,7 +184,7 @@ export default function HomePage() {
               }
             }, 400);
           }
-        } catch (e) { /* */ }
+        } catch { /* */ }
 
         return true;
       } catch (err) {
@@ -166,10 +194,10 @@ export default function HomePage() {
     }
 
     function grabQueryAndFetch() {
-      var input = document.querySelector(
+      const input = document.querySelector(
         '#addsearch-searchfield input[type="text"], #addsearch-searchfield input[type="search"], #addsearch-searchfield input'
       );
-      var query = input?.value?.trim();
+      const query = input?.value?.trim();
       if (!query || !clientRef.current) return;
 
       capturedQueryRef.current = query;
@@ -177,17 +205,15 @@ export default function HomePage() {
       setShowDiveDeeper(false);
 
       try {
-        clientRef.current.aiAnswers(query, function (response) {
+        clientRef.current.aiAnswers(query, (response) => {
           if (response && response.answer) {
-            var sources = (response.sources || []).map(function (s) {
-              return {
-                title: s.title || s.url || '',
-                url: s.url || '',
-              };
-            });
+            const sources = (response.sources || []).map((s) => ({
+              title: s.title || s.url || '',
+              url: s.url || '',
+            }));
             capturedAnswerRef.current = {
               answer: response.answer,
-              sources: sources,
+              sources,
             };
           }
         });
@@ -197,21 +223,21 @@ export default function HomePage() {
     }
 
     if (!tryInit()) {
-      var interval = setInterval(function () {
+      const interval = setInterval(() => {
         if (tryInit()) clearInterval(interval);
       }, 200);
-      var timeout = setTimeout(function () { clearInterval(interval); }, 15000);
-      return function () {
+      const timeout = setTimeout(() => clearInterval(interval), 15000);
+      return () => {
         clearInterval(interval);
         clearTimeout(timeout);
       };
     }
   }, []);
 
-  var handleDiveDeeper = useCallback(function () {
-    var query = capturedQueryRef.current || '';
-    var answerText = '';
-    var sources = [];
+  const handleDiveDeeper = useCallback(() => {
+    const query = capturedQueryRef.current || '';
+    let answerText = '';
+    let sources = [];
 
     if (capturedAnswerRef.current) {
       answerText = capturedAnswerRef.current.answer;
@@ -221,9 +247,9 @@ export default function HomePage() {
     try {
       sessionStorage.setItem(
         'diveContext',
-        JSON.stringify({ query: query, answer: answerText, sources: sources })
+        JSON.stringify({ query, answer: answerText, sources })
       );
-    } catch (e) { /* */ }
+    } catch { /* */ }
 
     router.push('/dive');
   }, [router]);
@@ -270,7 +296,7 @@ export default function HomePage() {
             AddSearch Combines Instant Answers With Powerful Search Results
           </p>
           <div className="cta-buttons">
-            
+            <a
               className="cta-btn-primary"
               href="https://app.addsearch.com/ver1/signup/user"
               target="_blank"
