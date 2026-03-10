@@ -118,10 +118,61 @@ export default function DivePage() {
     doFetch();
   }
 
-  /* ── Navigate to home page with a search query ───── */
+  /* ── Build a clean keyword search query from topic + follow-up ── */
+  function buildSearchQuery(rawQuery) {
+    const topic = context?.query || '';
+    const q = rawQuery || latestQuery || topic;
+
+    // If the query is already the original topic, use it as-is
+    if (!topic || q === topic) return q;
+
+    // If the follow-up is a short pronoun-heavy question like
+    // "how can I implement it?", "what does it cost?", "tell me more"
+    // combine it with the original topic into a proper search phrase
+    const pronounPatterns = /\b(it|this|that|these|those|them|its)\b/i;
+    const vaguePatterns = /^(how|what|where|when|why|can|tell|show|explain|more|details)/i;
+
+    if (pronounPatterns.test(q) || vaguePatterns.test(q)) {
+      // Extract the action/intent from the follow-up
+      const intent = q
+        .replace(/[?!.]+$/g, '')           // strip trailing punctuation
+        .replace(/\b(it|this|that|these|those|them|its)\b/gi, '') // remove pronouns
+        .replace(/\b(can I|can you|how to|how do I|how can I|tell me|show me|please)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (intent.length > 2) {
+        // e.g. topic="custom fields", intent="implement" → "custom fields implementation"
+        // Nominalize common verbs
+        const nominalized = intent
+          .replace(/\bimplement\b/i, 'implementation')
+          .replace(/\bconfigure\b/i, 'configuration')
+          .replace(/\binstall\b/i, 'installation')
+          .replace(/\bsetup\b/i, 'setup')
+          .replace(/\bcustomize\b/i, 'customization')
+          .replace(/\bintegrate\b/i, 'integration')
+          .replace(/\buse\b/i, 'usage')
+          .replace(/\benable\b/i, 'enabling')
+          .replace(/\bcreate\b/i, 'creating')
+          .replace(/\bmanage\b/i, 'managing');
+
+        return `${topic} ${nominalized}`.trim();
+      }
+      // If intent was all pronouns, just use the topic
+      return topic;
+    }
+
+    // For specific queries that don't have pronouns, use as-is
+    return q;
+  }
+
+  /* ── Navigate to home page with a keyword search query ───── */
   function goToSearch(query) {
+    const searchQuery = buildSearchQuery(query);
     try {
-      sessionStorage.setItem('pendingSearch', query || latestQuery);
+      sessionStorage.setItem('pendingSearch', searchQuery);
+      // Flag that this is a "keyword only" search — suppress AI Answers
+      sessionStorage.setItem('pendingSearchMode', 'keywordOnly');
     } catch { /* */ }
     router.push('/');
   }
