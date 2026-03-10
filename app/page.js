@@ -278,7 +278,7 @@ export default function HomePage() {
             >
               Start Free Trial
             </a>
-            
+            <a
               className="cta-btn-secondary"
               href="https://meetings-eu1.hubspot.com/addsearch/ai-conversations"
               target="_blank"
